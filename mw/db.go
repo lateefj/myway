@@ -1,35 +1,25 @@
-package mwapi
+package mw
 
 import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
-
-	_ "github.com/mattn/go-sqlite3" // sqlite3 rocks!
 )
 
 // database/sql has a built in connection pool so we just need a single instance
 var myDB *sql.DB
 
-func dbPath() string {
-	path := os.Getenv("DB_PATH")
-	if path == "" {
-		return ":memory:"
+// AssignDB set the database connection to use
+func AssignDB(db *sql.DB) {
+	if myDB != nil { // Don't judge...
+		myDB.Close()
 	}
-	return path
+	myDB = db
 }
 
-// SetupDB should only be called once!
-func SetupDB() (*sql.DB, error) {
-	var err error
-	if myDB != nil { // Don't judge...
-		return myDB, nil
-	}
-	log.Printf("Creating new database connection %s", dbPath())
-	myDB, err = sql.Open("sqlite3", dbPath())
-	myDB.SetMaxOpenConns(1)
-	return myDB, err
+// CurrentDB expose the database connection to external packages
+func CurrentDB() *sql.DB {
+	return myDB
 }
 
 // DBHandlerFunc defines a function type (yeah, Go is cool like that)
@@ -41,15 +31,14 @@ func DBHandler(fn DBHandlerFunc) http.HandlerFunc {
 	// Make sure the connection is still good
 	err := myDB.Ping()
 	if err != nil {
+		// TODO: Error handling code in a real production application
 		log.Printf("Database connection failed %s", err)
 	}
-	// TODO: Error handling code in a real production application
 
 	// This returns a regular
 	return func(w http.ResponseWriter, r *http.Request) {
 		fn(myDB, w, r)
 	}
-
 }
 
 // TxHandlerFunc most of the time just want a transaction

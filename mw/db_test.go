@@ -1,28 +1,44 @@
 // This is just an example so only going to write one test Blah!
-package mwapi
+package mw
 
 import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/lateefj/mctest"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 rocks!
 )
 
 const (
 	tableName = "test_t"
 )
 
+func dbPath() string {
+	path := os.Getenv("DB_PATH")
+	if path == "" {
+		return ":memory:"
+	}
+	return path
+}
+
 func init() {
-	db, _ := SetupDB()
+	// Database initialization
+	db, err := sql.Open("sqlite3", dbPath())
+	if err != nil {
+		log.Fatalf("Failed to connect to sqlite3 database with path %s error: %s", dbPath(), err)
+	}
 	db.Exec(fmt.Sprintf("CREATE TABLE %s(x INT, y INT);", tableName))
+	AssignDB(db)
 }
 
 func tableSize() int64 {
 	size := int64(0)
-	db, _ := SetupDB()
+	db := CurrentDB()
 	db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", tableName)).Scan(&size)
 	return size
 }

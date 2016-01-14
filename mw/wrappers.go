@@ -1,4 +1,4 @@
-package mwapi
+package mw
 
 import (
 	"encoding/json"
