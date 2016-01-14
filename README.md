@@ -1,4 +1,4 @@
-# go(ing)myway?
+# go(ing) myway?
 
 As I was listinging to this [song](https://en.wikipedia.org/wiki/My_Way_(Frank_Sinatra_album)) I thought I might share a bit of how I enjoy writing a Go web app with a database connection. 
 
