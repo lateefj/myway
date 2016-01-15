@@ -26,13 +26,18 @@ func dbPath() string {
 	return path
 }
 
+func setupDB(db *sql.DB) {
+	// Database initialization
+	db.Exec(fmt.Sprintf("CREATE TABLE %s(x INT, y INT);", tableName))
+}
 func init() {
 	// Database initialization
 	db, err := sql.Open("sqlite3", dbPath())
 	if err != nil {
 		log.Fatalf("Failed to connect to sqlite3 database with path %s error: %s", dbPath(), err)
+		return
 	}
-	db.Exec(fmt.Sprintf("CREATE TABLE %s(x INT, y INT);", tableName))
+	setupDB(db)
 	AssignDB(db)
 }
 
