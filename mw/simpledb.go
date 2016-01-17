@@ -44,22 +44,28 @@ func DBHandler(fn DBHandlerFunc) http.HandlerFunc {
 // TxHandlerFunc most of the time just want a transaction
 type TxHandlerFunc func(*sql.Tx, http.ResponseWriter, *http.Request) error
 
+func TxWrapper(db *sql.DB, w http.ResponseWriter, r *http.Request, fn TxHandlerFunc) {
+
+	tx, err := myDB.Begin()
+	// Default behavior is to commit the transaction
+	if err != nil {
+		log.Printf("Transcation failed to begin %s\n", err)
+	}
+	txErr := fn(tx, w, r)
+	if txErr == nil {
+		tx.Commit()
+		log.Printf("Successful commit")
+	} else {
+		tx.Rollback()
+		log.Printf("Transaction rolling back because of error: %s\n", txErr)
+	}
+}
+
 // TxHandler double down by using the wrapper we already built wrap
 func TxHandler(fn TxHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		DBHandler(func(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-			tx, err := myDB.Begin()
-			// Default behavior is to commit the transaction
-			if err != nil {
-				log.Printf("Transcation failed to begin %s\n", err)
-			}
-			txErr := fn(tx, w, r)
-			if txErr == nil {
-				tx.Commit()
-			} else {
-				tx.Rollback()
-				log.Printf("Transaction rolling back because of error: %s\n", txErr)
-			}
+			TxWrapper(db, w, r, fn)
 		})(w, r)
 	}
 }

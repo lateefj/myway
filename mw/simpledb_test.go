@@ -26,9 +26,10 @@ func dbPath() string {
 	return path
 }
 
-func setupDB(db *sql.DB) {
+func setupDB(db *sql.DB) error {
 	// Database initialization
-	db.Exec(fmt.Sprintf("CREATE TABLE %s(x INT, y INT);", tableName))
+	_, err := db.Exec(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s(x INT, y INT);", tableName))
+	return err
 }
 func init() {
 	// Database initialization
@@ -50,6 +51,8 @@ func tableSize() int64 {
 
 // Contrived example but yeah this is the idea
 func TestTxHandler(t *testing.T) {
+	db := CurrentDB()
+	db.Exec(fmt.Sprintf("DELETE FROM %s;", tableName))
 	if tableSize() != 0 {
 		t.Errorf("Expected 0 rows in table but has %d", tableSize())
 	}
@@ -57,6 +60,7 @@ func TestTxHandler(t *testing.T) {
 	resp := mctest.NewMockTestResponse(t)
 
 	TxHandler(func(tx *sql.Tx, w http.ResponseWriter, r *http.Request) error {
+		log.Printf("Inserting row ....")
 		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", tableName))
 		if err != nil {
 			t.Errorf("Failed to exec %s", err)

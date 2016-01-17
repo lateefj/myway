@@ -33,7 +33,6 @@ func MultiDBHandler(fn DBHandlerFunc) http.HandlerFunc {
 			log.Printf("TODO: Error handling for database connection failure....")
 			return
 		}
-		defer c.Close()
 		fn(c, w, r)
 	}
 }
@@ -41,8 +40,6 @@ func MultiDBHandler(fn DBHandlerFunc) http.HandlerFunc {
 // MultiTxHandler is the transaction version that just wrapps both MultiDBHandler and TxHandler. Hopefully the sum is greater than the parts
 func MultiTxHandler(fn TxHandlerFunc) http.HandlerFunc {
 	return MultiDBHandler(func(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-		TxHandler(func(tx *sql.Tx, w http.ResponseWriter, r *http.Request) error {
-			return fn(tx, w, r)
-		})(w, r)
+		TxWrapper(db, w, r, fn)
 	})
 }

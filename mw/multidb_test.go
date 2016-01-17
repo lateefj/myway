@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/julienschmidt/httprouter"
@@ -17,6 +18,7 @@ import (
 const (
 	testDBUrlPath   = "/api/name/:year/:name"
 	testMultiDBBase = "/tmp/testmyway"
+	testMultiTable  = "test_multi_table"
 )
 
 func dbDir() string {
@@ -27,20 +29,38 @@ func dbDir() string {
 	return path
 }
 
-var databaseDB map[string]*sql.DB
+func dbFullPath(key string) string {
+	return fmt.Sprintf("%s/%s.db", dbDir(), key)
+}
 
-func findDB(key string) (*sql.DB, error) {
-	if databaseDB == nil {
-		databaseDB = make(map[string]*sql.DB)
-	}
+var dbMap map[string]*sql.DB
+
+func init() {
+	dbMap = make(map[string]*sql.DB)
+}
+
+// Fun with locks
+var dbMapLock sync.RWMutex
+
+func FindDB(key string) (*sql.DB, error) {
 	var err error
-	db, exists := databaseDB[key]
-	if !exists {
-		path := fmt.Sprintf("%s/%s.db", dbDir(), key)
-		db, err = sql.Open("sqlite3", path)
-		databaseDB[key] = db
-		setupDB(db)
+	dbMapLock.RLock()
+	db, exists := dbMap[key]
+	dbMapLock.RUnlock()
+	if exists {
+		return db, err
 	}
+	os.MkdirAll(dbDir(), 0777)
+	path := dbFullPath(key)
+	db, err = sql.Open("sqlite3", path)
+	if err != nil {
+		log.Printf("WTF on open path %s.... error: %s", path, err)
+		return nil, err
+	}
+	log.Printf("Opened database file %s", path)
+	dbMapLock.Lock()
+	dbMap[key] = db
+	dbMapLock.Unlock()
 	return db, err
 }
 
@@ -57,7 +77,7 @@ func (tdbc *testDBConnect) Open(w http.ResponseWriter, r *http.Request) (*sql.DB
 	if year == "" {
 		return nil, errors.New("Failed to find year in path")
 	}
-	db, err := findDB(year)
+	db, err := FindDB(year)
 	if err != nil {
 		log.Printf("Failed to find database for year %s", year)
 	}
@@ -73,47 +93,111 @@ func init() {
 	AssignDBConnect(mytdbc)
 }
 
-func yearTableSize(year string) int64 {
-	size := int64(0)
-	db, err := findDB(year)
+func yearTableSize(year, tName string) (int, error) {
+	var size int
+	db, err := FindDB(year)
 	if err != nil {
-		return int64(-1)
+		return -1, err
 	}
-	db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", tableName)).Scan(&size)
-	return size
+	err = db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", tName)).Scan(&size)
+	if err != nil {
+		log.Printf("Error query count %s", err)
+		return -1, err
+	}
+	log.Printf("For year %s size is %d", year, size)
+	return size, nil
 }
-func cleanUpDBDir() {
-	os.RemoveAll(testMultiDBBase)
+
+func cleanUpYears(years []int) {
+	for _, year := range years {
+		os.RemoveAll(dbFullPath(fmt.Sprintf("%d", year)))
+	}
 }
+func createTestDB(t *testing.T, year, createSQL, tName string) {
+	db, err := FindDB(year)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.Printf("For database year %s running createSQL %s", year, createSQL)
+	_, err = db.Exec(createSQL)
+	if err != nil {
+		t.Fatalf("%s\n Failed to create table %s", createSQL, err)
+	}
+	s, err := yearTableSize(year, tName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s != 0 {
+		t.Fatalf("Expected 0 rows in table but has %d", s)
+	}
+}
+
+func TestFindDB(t *testing.T) {
+	years := []int{2, 4, 8, 16}
+	defer cleanUpYears(years)
+	for _, year := range years {
+		ys := fmt.Sprintf("%d", year)
+		createTestDB(t, ys, "CREATE TABLE IF NOT EXISTS test_table(year INT, i INT);", "test_table")
+		db, err := FindDB(ys)
+		if err != nil {
+			t.Error(err)
+		}
+		for i := 0; i < year; i++ {
+			_, err = db.Exec(fmt.Sprintf("INSERT INTO test_table VALUES(%d, %d)", year, i))
+			if err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	for _, year := range years {
+		ys := fmt.Sprintf("%d", year)
+		size, err := yearTableSize(ys, "test_table")
+		if err != nil {
+			t.Error(err)
+		}
+		if year != size {
+			t.Errorf("Expected size of %d but it is %d", year, size)
+		}
+	}
+}
+
 func TestMultiTxHandler(t *testing.T) {
-	//defer cleanUpDBDir()
-	year := "1970"
-	if yearTableSize(year) != 0 {
-		t.Errorf("Expected 0 rows in table but has %d", tableSize())
-	}
+	y := 1970
+	year := fmt.Sprintf("%d", y)
+	createSQL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s(year INT, x INT);", testMultiTable)
+	createTestDB(t, year, createSQL, testMultiTable)
+	//defer cleanUpYears([]int{y})
 	req, _ := http.NewRequest("GET", fmt.Sprintf("/api/name/%s/Epic", year), nil)
 	resp := mctest.NewMockTestResponse(t)
 	MultiTxHandler(func(tx *sql.Tx, w http.ResponseWriter, r *http.Request) error {
 		log.Printf("Calling insert now...")
-		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", tableName))
+		sql := fmt.Sprintf("INSERT INTO %s VALUES(%d, 1);", testMultiTable, y)
+		_, err := tx.Exec(sql)
 		if err != nil {
-			t.Errorf("Failed to exec insert %s", err)
+			t.Fatalf("Insert failure error: %s \n%s", err, sql)
 		}
 		return err
 	})(resp, req)
-	if yearTableSize(year) != 1 {
-		t.Errorf("Expected 1 row in table but has %d", yearTableSize(year))
+	s, err := yearTableSize(year, testMultiTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s != 1 {
+		t.Fatalf("Expected 1 row in table but has %d", s)
 	}
 	MultiTxHandler(func(tx *sql.Tx, w http.ResponseWriter, r *http.Request) error {
-		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", tableName))
+		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", testMultiTable))
 		if err != nil {
 			t.Errorf("Failed to exec %s", err)
 		}
 		return errors.New("Failed expect automagic rollback please")
 	})(resp, req)
 	// Should be same number of rows
-	if yearTableSize(year) != 1 {
-		t.Errorf("Expected 1 rows in table but has %d", yearTableSize(year))
+	s, err = yearTableSize(year, testMultiTable)
+	if err != nil {
+		t.Fatal(err)
 	}
-
+	if s != 1 {
+		t.Fatalf("Expected 1 row in table but has %d", s)
+	}
 }
