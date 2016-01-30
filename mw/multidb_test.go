@@ -48,6 +48,7 @@ func FindDB(key string) (*sql.DB, error) {
 	db, exists := dbMap[key]
 	dbMapLock.RUnlock()
 	if exists {
+		log.Printf("Found databse in dbMap with key %s", key)
 		return db, err
 	}
 	os.MkdirAll(dbDir(), 0777)
@@ -58,6 +59,7 @@ func FindDB(key string) (*sql.DB, error) {
 		return nil, err
 	}
 	log.Printf("Opened database file %s", path)
+	db.SetMaxOpenConns(1) // SQLite is single threaded :(
 	dbMapLock.Lock()
 	dbMap[key] = db
 	dbMapLock.Unlock()

@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	tableName = "test_t"
+	simpleTestTableName = "test_t"
 )
 
 func dbPath() string {
@@ -28,7 +28,8 @@ func dbPath() string {
 
 func setupDB(db *sql.DB) error {
 	// Database initialization
-	_, err := db.Exec(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s(x INT, y INT);", tableName))
+	log.Printf("Setting up database %s", simpleTestTableName)
+	_, err := db.Exec(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s(x INT, y INT);", simpleTestTableName))
 	return err
 }
 func init() {
@@ -45,23 +46,24 @@ func init() {
 func tableSize() int64 {
 	size := int64(0)
 	db := CurrentDB()
-	db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", tableName)).Scan(&size)
+	db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", simpleTestTableName)).Scan(&size)
 	return size
 }
 
 // Contrived example but yeah this is the idea
 func TestTxHandler(t *testing.T) {
 	db := CurrentDB()
-	db.Exec(fmt.Sprintf("DELETE FROM %s;", tableName))
+	setupDB(db)
+	db.Exec(fmt.Sprintf("DELETE FROM %s;", simpleTestTableName))
 	if tableSize() != 0 {
-		t.Errorf("Expected 0 rows in table but has %d", tableSize())
+		t.Fatalf("Expected 0 rows in table but has %d", tableSize())
 	}
 	req, _ := http.NewRequest("GET", "/path/to/handler", nil)
 	resp := mctest.NewMockTestResponse(t)
 
 	TxHandler(func(tx *sql.Tx, w http.ResponseWriter, r *http.Request) error {
 		log.Printf("Inserting row ....")
-		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", tableName))
+		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", simpleTestTableName))
 		if err != nil {
 			t.Errorf("Failed to exec %s", err)
 		}
@@ -71,7 +73,7 @@ func TestTxHandler(t *testing.T) {
 		t.Errorf("Expected 1 rows in table but has %d", tableSize())
 	}
 	TxHandler(func(tx *sql.Tx, w http.ResponseWriter, r *http.Request) error {
-		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", tableName))
+		_, err := tx.Exec(fmt.Sprintf("INSERT INTO %s VALUES(1, 1);", simpleTestTableName))
 		if err != nil {
 			t.Errorf("Failed to exec %s", err)
 		}
